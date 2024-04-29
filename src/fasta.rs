@@ -1,8 +1,6 @@
-//! Struct that extract part of file (called block) and read it as fasta file.
+//! Fasta parsing
 
-// #![feature(trace_macros)]
-
-// trace_macros!(true);
+/* std use */
 
 /* crate use */
 use bstr::ByteSlice;
@@ -10,19 +8,10 @@ use bstr::ByteSlice;
 /* project use */
 use crate::block;
 use crate::error;
-use crate::impl_producer;
-use crate::impl_reader;
 
-/// Struct that store a fasta record
-pub struct Record<'a> {
-    /// Fasta comment without `>`
-    pub comment: &'a [u8],
-
-    /// Fasta sequence
-    pub sequence: &'a [u8],
-}
-
-impl_producer!(Producer, |block: &[u8]| {
+#[cfg(feature = "derive")]
+#[biommap_derive::file2block(name = File2Block, block_type = memmap2::Mmap)]
+fn fasta(block: &[u8]) -> error::Result<u64> {
     let mut end = block.len();
 
     for _ in 0..2 {
@@ -36,232 +25,231 @@ impl_producer!(Producer, |block: &[u8]| {
     }
 
     Err(error::Error::NotAFastaFile)
-});
+}
 
-impl_reader!(
-    Reader,
-    'a,
-    Record,
-    |block: &'a block::Block, offset: &mut usize| {
-        if *offset == block.len() {
-            Ok(None)
-        } else {
-            let comment = &block.data()[Self::get_line(block, offset)?];
-            *offset += comment.len() + 1;
+/// Struct that store a fasta record
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+pub struct Record<'a> {
+    comment: &'a [u8],
+    sequence: &'a [u8],
+}
 
-            let sequence = &block.data()[Self::get_line(block, offset)?];
-            *offset += sequence.len() + 1;
-
-            Ok(Some(Record { comment, sequence }))
-        }
+impl<'a> Record<'a> {
+    /// Fasta comment without `>`
+    pub fn comment(&self) -> &'a [u8] {
+        &self.comment
     }
-);
+
+    /// Fasta sequence
+    pub fn sequence(&self) -> &'a [u8] {
+        &self.sequence
+    }
+}
+
+#[cfg(feature = "derive")]
+#[biommap_derive::block2record(name = Block2Record, generic_type = DATA)]
+pub fn fasta(&mut self) -> error::Result<Option<Record<'_>>> {
+    if self.offset == self.block.len() {
+        Ok(None)
+    } else {
+        let comment = &self.block.data()[self.get_line()?];
+        self.offset += comment.len() as u64 + 1;
+
+        let sequence = &self.block.data()[self.get_line()?];
+        self.offset += sequence.len() as u64 + 1;
+
+        Ok(Some(Record { comment, sequence }))
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    /* std use */
+
+    /* crates use */
+    use biotest::Format as _;
+
+    /* project use */
+    use crate::error;
+
+    /* local use */
     use super::*;
 
-    mod producer {
-        use super::*;
+    #[cfg(feature = "derive")]
+    #[test]
+    fn default() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
 
-        use std::io::Write;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(50).build().unwrap();
 
-        #[test]
-        fn new() -> error::Result<()> {
-            let mut tmp = Producer::new(crate::tests::generate_fasta(42, 100, 150)?)?;
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
-            let block = tmp.next_block()?.unwrap();
+        let mut producer = File2Block::new(temp.path())?;
 
-            assert_eq!(block.len(), 15490);
+        let option = producer.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 8148);
 
-            assert!(tmp.next_block()?.is_none());
+        let option = producer.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 252);
 
-            Ok(())
-        }
+        let option = producer.next_block()?;
+        assert!(option.is_none());
 
-        #[test]
-        fn with_blocksize() -> error::Result<()> {
-            let mut tmp =
-                Producer::with_blocksize(463, crate::tests::generate_fasta(42, 1_000, 150)?)
-                    .unwrap();
-
-            let block = tmp.next_block()?.unwrap();
-
-            assert_eq!(block.len(), 462);
-
-            assert_eq!(
-                String::from_utf8(block.data().to_vec()).unwrap(),
-                ">0
-TTAGATTATAGTACGGTATAGTGGTTACTATGTAGCCTAAGTGGCGCCCGTTGTAGAGGAATCCACTTATATAACACAGGTATAATCCGGACGGCATGCGCAGGCATGCCTATATTCTATGACAGCAGGATTATGGAAGATGGTGCTCTA
->1
-GATACGTTTGGGGCAACCCGTAGCACGACCGGCTATGTGTTTTCTTGGACATAGTTTCGTCCACGATATATACAAGGACGCTTGGGAATAGGGCAGCGGAGTTATCGTGTACCTCCTAGCTTTTAGTTGTGCTTTAACAGTGTAACATTG
->2
-GGACGCTATTACTCGCCGGTGAGGCGGTCTTCCTTGACTATACCGATCGTGGAGTTCATGCGCGCGGATCCCTCAGCGTTCTCGGGAAGCGCGAACAGAGCGTCCCCTTATACTAATTCCACGCAATGTACTCGCTTACGATTGCAATTT
-".to_string()
-            );
-
-            Ok(())
-        }
-
-        #[test]
-        fn with_blocksize_offset() -> error::Result<()> {
-            let mut tmp = Producer::with_blocksize_offset(
-                463,
-                154,
-                crate::tests::generate_fasta(42, 1_000, 150)?,
-            )
-            .unwrap();
-
-            let block = tmp.next_block()?.unwrap();
-
-            assert_eq!(block.len(), 462);
-
-            assert_eq!(
-                String::from_utf8(block.data().to_vec()).unwrap(),
-                ">1
-GATACGTTTGGGGCAACCCGTAGCACGACCGGCTATGTGTTTTCTTGGACATAGTTTCGTCCACGATATATACAAGGACGCTTGGGAATAGGGCAGCGGAGTTATCGTGTACCTCCTAGCTTTTAGTTGTGCTTTAACAGTGTAACATTG
->2
-GGACGCTATTACTCGCCGGTGAGGCGGTCTTCCTTGACTATACCGATCGTGGAGTTCATGCGCGCGGATCCCTCAGCGTTCTCGGGAAGCGCGAACAGAGCGTCCCCTTATACTAATTCCACGCAATGTACTCGCTTACGATTGCAATTT
->3
-GCAAATGAGGACCATCGTCCCTTCATATCGTCGATAAGGAGCTTGATCCTGAATGTCCCTCAATCCGCGGCATGGCTAAGTACCACCGTGGATGTAAATTTTTCAGTCGTCTCTTCATACTGTTCCTGTACTGTCAGGGATGCTCCCTTT
-".to_string()
-            );
-
-            Ok(())
-        }
-
-        #[test]
-        fn with_blocksize_buffer_larger_file() -> error::Result<()> {
-            let mut tmp =
-                Producer::with_blocksize(8092, crate::tests::generate_fasta(44, 2, 150)?).unwrap();
-
-            let block = tmp.next_block()?.unwrap();
-
-            assert_eq!(block.len(), 308);
-
-            Ok(())
-        }
-
-        #[test]
-        fn get_all_block() -> error::Result<()> {
-            let mut tmp = Producer::new(crate::tests::generate_fasta(42, 1_000, 150)?).unwrap();
-
-            let mut block_length = Vec::new();
-            while let Ok(Some(block)) = tmp.next_block() {
-                block_length.push(block.len());
-            }
-
-            assert_eq!(block_length, vec![65410, 65520, 24960]);
-
-            Ok(())
-        }
-
-        #[test]
-        fn check_block() -> error::Result<()> {
-            let mut tmp =
-                Producer::with_blocksize(400, crate::tests::generate_fasta(42, 5, 150)?).unwrap();
-
-            assert_eq!(
-                String::from_utf8(tmp.next_block()?.unwrap().data().to_vec()),
-                Ok(">0
-TTAGATTATAGTACGGTATAGTGGTTACTATGTAGCCTAAGTGGCGCCCGTTGTAGAGGAATCCACTTATATAACACAGGTATAATCCGGACGGCATGCGCAGGCATGCCTATATTCTATGACAGCAGGATTATGGAAGATGGTGCTCTA
->1
-GATACGTTTGGGGCAACCCGTAGCACGACCGGCTATGTGTTTTCTTGGACATAGTTTCGTCCACGATATATACAAGGACGCTTGGGAATAGGGCAGCGGAGTTATCGTGTACCTCCTAGCTTTTAGTTGTGCTTTAACAGTGTAACATTG
-".to_string())
-            );
-            assert_eq!(
-                String::from_utf8(tmp.next_block()?.unwrap().data().to_vec()),
-                Ok(">2
-GGACGCTATTACTCGCCGGTGAGGCGGTCTTCCTTGACTATACCGATCGTGGAGTTCATGCGCGCGGATCCCTCAGCGTTCTCGGGAAGCGCGAACAGAGCGTCCCCTTATACTAATTCCACGCAATGTACTCGCTTACGATTGCAATTT
->3
-GCAAATGAGGACCATCGTCCCTTCATATCGTCGATAAGGAGCTTGATCCTGAATGTCCCTCAATCCGCGGCATGGCTAAGTACCACCGTGGATGTAAATTTTTCAGTCGTCTCTTCATACTGTTCCTGTACTGTCAGGGATGCTCCCTTT
-".to_string())
-            );
-            assert_eq!(
-                String::from_utf8(tmp.next_block()?.unwrap().data().to_vec()),
-                Ok(">4
-CACAGAGCTCGTATAATCAGTAAACGCCACGGTCCTTTCTCTGTTAACCGCTATGCTAGAGTTCGACGGATTGCGAACTGTTTATAAAGGTATTATTGGTGGAAGATCGACGCAGTTGGTGCCGCAGGAACCGGTCAACTTAATGCTGAG
-".to_string())
-            );
-            assert!(tmp.next_block().is_ok());
-            assert!(tmp.next_block()?.is_none());
-
-            Ok(())
-        }
-
-        #[test]
-        fn not_a_fasta() -> error::Result<()> {
-            let mut file = crate::tests::write_in_tempfile(
-                b"Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-Vivamus ut nulla eget diam eleifend bibendum.
-Praesent porta sapien id tortor hendrerit, a hendrerit dolor commodo. Donec sed elit enim.",
-            )?;
-
-            let mut producer = Producer::with_blocksize(150, file.path())?;
-            assert!(producer.next_block().is_err());
-
-            {
-                let mut rewrite = file.reopen()?;
-                rewrite.write(
-                    b"+FAILLED FILE
-+3
-+TTGGGCATGAGGTTCA
-@3ueauie
-+~vGLKg+n!*iJ\\K
-@iuiea
-",
-                )?;
-            }
-
-            let mut producer = Producer::with_blocksize(82, file.path())?;
-
-            assert!(producer.next_block().is_err());
-
-            let mut producer = Producer::with_blocksize(82, file)?;
-            assert!(producer.next().is_some());
-            assert!(producer.next().unwrap().is_err());
-
-            Ok(())
-        }
+        Ok(())
     }
 
-    mod reader {
-        use super::*;
+    #[cfg(feature = "derive")]
+    #[test]
+    fn blocksize() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
 
-        #[test]
-        fn iterate_over_seq() -> error::Result<()> {
-            let mut file = crate::tests::generate_fasta(42, 5, 150)?;
-            let mut producer = Producer::with_blocksize(500, file)?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(50).build().unwrap();
 
-            let mut comments = Vec::new();
-            let mut seqs = Vec::new();
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
-            while let Ok(Some(block)) = producer.next_block() {
-                let mut reader = Reader::new(block);
+        let mut producer = File2Block::with_blocksize(8192 * 2, temp.path())?;
 
-                while let Ok(Some(record)) = reader.next_record() {
-                    comments.push(String::from_utf8(record.comment.to_vec()).unwrap());
-                    seqs.push(String::from_utf8(record.sequence.to_vec()).unwrap());
-                }
+        let option = producer.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 8400);
+
+        let option = producer.next_block()?;
+        assert!(option.is_none());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "derive")]
+    #[test]
+    fn offset() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
+
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(50).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
+
+        let mut producer = File2Block::with_offset(8050, temp.path())?;
+
+        let option = producer.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 350);
+
+        let option = producer.next_block()?;
+        assert!(option.is_none());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "derive")]
+    #[test]
+    fn blocksize_offset() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
+
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(100).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
+
+        let mut producer = File2Block::with_blocksize_offset(4096, 8050, temp.path())?;
+
+        let option = producer.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 4010);
+
+        let option = producer.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 1340);
+
+        let option = producer.next_block()?;
+        assert!(option.is_none());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "derive")]
+    #[test]
+    fn records() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
+
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(50).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 10).unwrap();
+
+        let mut comments = Vec::new();
+        let mut seqs = Vec::new();
+
+        let mut producer = File2Block::new(temp.path())?;
+
+        while let Ok(Some(block)) = producer.next_block() {
+            let mut reader = Block2Record::new(block);
+
+            while let Ok(Some(record)) = reader.next_record() {
+                comments.push(String::from_utf8(record.comment().to_vec()).unwrap());
+                seqs.push(String::from_utf8(record.sequence().to_vec()).unwrap());
             }
+        }
 
-            assert_eq!(
-                comments,
-                vec![
-                    ">0".to_string(),
-                    ">1".to_string(),
-                    ">2".to_string(),
-                    ">3".to_string(),
-                    ">4".to_string()
-                ]
-            );
-            assert_eq!(
-                seqs,
-                vec![
-"TTAGATTATAGTACGGTATAGTGGTTACTATGTAGCCTAAGTGGCGCCCGTTGTAGAGGAATCCACTTATATAACACAGGTATAATCCGGACGGCATGCGCAGGCATGCCTATATTCTATGACAGCAGGATTATGGAAGATGGTGCTCTA".to_string(), "GATACGTTTGGGGCAACCCGTAGCACGACCGGCTATGTGTTTTCTTGGACATAGTTTCGTCCACGATATATACAAGGACGCTTGGGAATAGGGCAGCGGAGTTATCGTGTACCTCCTAGCTTTTAGTTGTGCTTTAACAGTGTAACATTG".to_string(), "GGACGCTATTACTCGCCGGTGAGGCGGTCTTCCTTGACTATACCGATCGTGGAGTTCATGCGCGCGGATCCCTCAGCGTTCTCGGGAAGCGCGAACAGAGCGTCCCCTTATACTAATTCCACGCAATGTACTCGCTTACGATTGCAATTT".to_string(), "GCAAATGAGGACCATCGTCCCTTCATATCGTCGATAAGGAGCTTGATCCTGAATGTCCCTCAATCCGCGGCATGGCTAAGTACCACCGTGGATGTAAATTTTTCAGTCGTCTCTTCATACTGTTCCTGTACTGTCAGGGATGCTCCCTTT".to_string(), "CACAGAGCTCGTATAATCAGTAAACGCCACGGTCCTTTCTCTGTTAACCGCTATGCTAGAGTTCGACGGATTGCGAACTGTTTATAAAGGTATTATTGGTGGAAGATCGACGCAGTTGGTGCCGCAGGAACCGGTCAACTTAATGCTGAG".to_string()]
+        assert_eq!(
+            comments,
+            vec![
+                ">GSWNPZYBHL atbbutlfemxuzgaghmwn".to_string(),
+                ">RCUDMHKKGS ajefuxhqoiwnooilwywl".to_string(),
+                ">RVOLOAYNLY acavbgerslbixoxxodry".to_string(),
+                ">CLCUXEJUUO bxvvxhrfygckrphyaldf".to_string(),
+                ">UNLMOTCONV zzkwrudmkpkjusxndtiw".to_string(),
+                ">IZJNWZYVRE oizferdlsseuahsvxvjh".to_string(),
+                ">MOHSCWTGTN hvlfyxahfdjoyxuahmga".to_string(),
+                ">MELUFGTSRI ugyirugryxamshjpzprp".to_string(),
+                ">AGVXTZLFVR yzktzbvurjcfibwtjutf".to_string(),
+                ">ASKDOTFRUC uubdjpvcftawzzlxspaf".to_string()
+            ]
+        );
+        assert_eq!(
+            seqs,
+            vec![
+                "gccAcggtAatGcTtgtaCgcAGgAtaTcgAAtTaTaGaTggttGCtCat".to_string(),
+                "AGacAtgCtGCAAtTacCGtTAAcaGGtatTCaTCctcTGgAActTgCGA".to_string(),
+                "ttCcGcTTGcgAACcTtCttAacGtTtAtGTgACAGCCaCGctGagattT".to_string(),
+                "TGTCCACgTTTGagtGaGCatAGGACAAaacTaTTagagGtatAGCcTat".to_string(),
+                "ACTacgtCTaTgTCAGgCtaGTtcCCTcgcTgAgGgAtCAAatTCTATTG".to_string(),
+                "ATcaTTCGaCCttcAaGCGCAatgaTGAtaatcaCtGcTAGCCAgaTTgc".to_string(),
+                "CCtcTctCAtgCGCagTCTcaacCATAtGtGgtAtacAagtTGgAtgcGt".to_string(),
+                "AgtaTgacgtCCTAtActaGAggcAAGGACGaATctgCaaatgctgTcCa".to_string(),
+                "aTtGgCACgCcgcCgATtcGCaTatTGGGCTacgtgACCGttTCAttTac".to_string(),
+                "GgACTctgTGTtaAGCAgcagAcGttCagTgCTAtccTGAAccCaaAcac".to_string(),
+            ]
         );
 
-            Ok(())
-        }
+        Ok(())
+    }
+
+    #[cfg(feature = "derive")]
+    #[test]
+    fn not_fasta() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
+
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
+
+        let mut producer = File2Block::with_blocksize(200, temp.path())?;
+
+        let result = producer.next_block();
+        assert_matches::assert_matches!(result, Err(error::Error::NotAFastaFile));
+
+        Ok(())
     }
 }

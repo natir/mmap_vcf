@@ -1,4 +1,4 @@
-//! Struct that extract part of file (called block) and read it as fastq file.
+//! Fastq parsing
 
 /* std use */
 
@@ -8,22 +8,10 @@ use bstr::ByteSlice;
 /* project use */
 use crate::block;
 use crate::error;
-use crate::impl_producer;
-use crate::impl_reader;
 
-/// Strutt that store a fastq record
-pub struct Record<'a> {
-    /// Fastq comment, without `>`
-    pub comment: &'a [u8],
-    /// Fastq sequence
-    pub sequence: &'a [u8],
-    /// Fastq plus line, without `>`
-    pub plus: &'a [u8],
-    /// Fastq quality
-    pub quality: &'a [u8],
-}
-
-impl_producer!(Producer, |block: &[u8]| {
+#[cfg(feature = "derive")]
+#[biommap_derive::file2block(name = File2Block, block_type = memmap2::Mmap)]
+fn fastq(block: &[u8]) -> error::Result<u64> {
     let mut end = block.len();
 
     for _ in 0..5 {
@@ -58,192 +46,324 @@ impl_producer!(Producer, |block: &[u8]| {
     }
 
     Err(error::Error::NotAFastqFile)
-});
+}
 
-impl_reader!(
-    Reader,
-    'a,
-    Record,
-    |block: &'a block::Block, offset: &mut usize| {
-        if *offset == block.len() {
-            Ok(None)
-        } else {
-            let comment = &block.data()[Self::get_line(block, offset)?];
-            *offset += comment.len() + 1;
+/// Struct that store a fastq record
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+pub struct Record<'a> {
+    comment: &'a [u8],
+    sequence: &'a [u8],
+    plus: &'a [u8],
+    quality: &'a [u8],
+}
 
-            let sequence = &block.data()[Self::get_line(block, offset)?];
-            *offset += sequence.len() + 1;
-
-            let plus = &block.data()[Self::get_line(block, offset)?];
-            *offset += plus.len() + 1;
-
-            let quality = &block.data()[Self::get_line(block, offset)?];
-            *offset += quality.len() + 1;
-
-            Ok(Some(Record {
-                comment,
-                sequence,
-                plus,
-                quality,
-            }))
-        }
+impl<'a> Record<'a> {
+    /// Fastq comment, without `>`
+    pub fn comment(&self) -> &'a [u8] {
+        &self.comment
     }
-);
+
+    /// Fastq sequence
+    pub fn sequence(&self) -> &'a [u8] {
+        &self.sequence
+    }
+
+    /// Fastq plus line, without `+`
+    pub fn plus(&self) -> &'a [u8] {
+        &self.plus
+    }
+
+    /// Fastq quality
+    pub fn quality(&self) -> &'a [u8] {
+        &self.quality
+    }
+}
+
+#[cfg(feature = "derive")]
+#[biommap_derive::block2record(name = Block2Record, generic_type = DATA)]
+pub fn fastq(&mut self) -> error::Result<Option<Record<'_>>> {
+    if self.offset == self.block.len() {
+        Ok(None)
+    } else {
+        let comment = &self.block.data()[self.get_line()?];
+        self.offset += comment.len() as u64 + 1;
+
+        let sequence = &self.block.data()[self.get_line()?];
+        self.offset += sequence.len() as u64 + 1;
+
+        let plus = &self.block.data()[self.get_line()?];
+        self.offset += plus.len() as u64 + 1;
+
+        let quality = &self.block.data()[self.get_line()?];
+        self.offset += quality.len() as u64 + 1;
+
+        Ok(Some(Record {
+            comment,
+            sequence,
+            plus,
+            quality,
+        }))
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    /* std use */
+    use std::io::Write as _;
+
+    /* crates use */
+    use biotest::Format as _;
+
+    /* project use */
+
+    /* local use */
     use super::*;
 
-    mod producer {
-        use super::*;
+    #[cfg(feature = "derive")]
+    #[test]
+    fn default() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
 
-        use std::io::Write;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(150).build().unwrap();
 
-        #[test]
-        fn new() -> error::Result<()> {
-            let file = crate::tests::generate_fastq(42, 100, 150)?;
-            let mut tmp = Producer::new(file).unwrap();
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
-            let block = tmp.next_block()?.unwrap();
+        let mut blocks = File2Block::new(temp.path())?;
 
-            assert_eq!(block.len(), 30980);
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 7866);
 
-            assert!(tmp.next_block()?.is_none());
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 7866);
 
-            Ok(())
-        }
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 7866);
 
-        #[test]
-        fn with_blocksize() -> error::Result<()> {
-            let file = crate::tests::generate_fastq(42, 100, 150)?;
-            let mut tmp = Producer::with_blocksize(463, file).unwrap();
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 7866);
 
-            let block = tmp.next_block()?.unwrap();
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 2736);
 
-            assert_eq!(block.len(), 308);
+        let option = blocks.next_block()?;
+        assert!(option.is_none());
 
-            assert_eq!(
-                String::from_utf8(block.data().to_vec()).unwrap(),
-                "@0
-TTAGATTATAGTACGGTATAGTGGTTACTATGTAGCCTAAGTGGCGCCCGTTGTAGAGGAATCCACTTATATAACACAGGTATAATCCGGACGGCATGCGCAGGCATGCCTATATTCTATGACAGCAGGATTATGGAAGATGGTGCTCTA
-+0
-^U3<L0PV{cnrl:8N`!:=mF8M0!0Ez/d{4j$=9f5rLeAQ-H.ptT3w6aMy8Z6O-dZ}2`UX=YJ-Etg`s&B%~F!kR7S8]@lTI<2-\\';v0}hU.(T*0VHGx,>Gze)*5rFv}k@RllOE2K)\"DQJvO)bl?(dDhh
-".to_string()
-            );
+        Ok(())
+    }
 
-            Ok(())
-        }
+    #[cfg(feature = "derive")]
+    #[test]
+    fn blocksize() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
 
-        #[test]
-        fn with_blocksize_offset() -> error::Result<()> {
-            let file = crate::tests::generate_fastq(42, 100, 150)?;
-            let mut tmp = Producer::with_blocksize_offset(463, 308, file).unwrap();
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(150).build().unwrap();
 
-            let block = tmp.next_block()?.unwrap();
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
-            assert_eq!(block.len(), 308);
+        let mut blocks = File2Block::with_blocksize(8192 * 2, temp.path())?;
 
-            assert_eq!(
-                String::from_utf8(block.data().to_vec()).unwrap(),
-                "@1
-AGTTATCGTGTACCTCCTAGCTTTTAGTTGTGCTTTAACAGTGTAACATTGGGACGCTATTACTCGCCGGTGAGGCGGTCTTCCTTGACTATACCGATCGTGGAGTTCATGCGCGCGGATCCCTCAGCGTTCTCGGGAAGCGCGAACAGA
-+1
-iCW?:KL~15\\E|MNRKY)S$?~~Ub}d)dY2LX:e@b^'<<$$e56W0fdV,<Y>Yd(J<5p6xt)z+OxuPXv?/_yH8z^%Sks1*nxm$<7*YdkvNPf:>YW=$uxZ)}[v/DlZm&EW(s(cMelx\"iEV3Hp]cz3%_T@\\Ms
-".to_string()
-            );
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 16074);
 
-            Ok(())
-        }
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 16074);
 
-        #[test]
-        fn with_blocksize_buffer_larger_file() -> error::Result<()> {
-            let file = crate::tests::generate_fastq(42, 100, 150)?;
-            let mut tmp = Producer::with_blocksize(8092, file).unwrap();
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 2052);
 
-            let block = tmp.next_block().unwrap().unwrap();
+        let option = blocks.next_block()?;
+        assert!(option.is_none());
 
-            assert_eq!(block.len(), 616);
+        Ok(())
+    }
 
-            Ok(())
-        }
+    #[cfg(feature = "derive")]
+    #[test]
+    fn offset() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
 
-        #[test]
-        fn get_all_block() -> error::Result<()> {
-            let file = crate::tests::generate_fastq(42, 100, 150)?;
-            let mut tmp = Producer::new(file).unwrap();
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(150).build().unwrap();
 
-            let mut block_length = Vec::new();
-            while let Ok(Some(block)) = tmp.next_block() {
-                block_length.push(block.len());
+        generator.create(temp.path(), &mut rng, 10).unwrap();
+
+        let mut blocks = File2Block::with_offset(1000, temp.path())?;
+
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 2420);
+
+        let option = blocks.next_block()?;
+        assert!(option.is_none());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "derive")]
+    #[test]
+    fn blocksize_offset() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
+
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(150).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
+
+        let mut blocks = File2Block::with_blocksize_offset(4096, 24014, temp.path())?;
+
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 4030);
+
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 3762);
+
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 2394);
+
+        let option = blocks.next_block()?;
+        assert!(option.is_none());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "derive")]
+    #[test]
+    fn records() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
+
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(50).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 10).unwrap();
+
+        let mut comments = Vec::new();
+        let mut seqs = Vec::new();
+        let mut pluss = Vec::new();
+        let mut quals = Vec::new();
+
+        let mut blocks = File2Block::new(temp.path())?;
+
+        while let Ok(Some(block)) = blocks.next_block() {
+            let mut reader = Block2Record::new(block);
+
+            while let Ok(Some(record)) = reader.next_record() {
+                comments.push(String::from_utf8(record.comment().to_vec()).unwrap());
+                seqs.push(String::from_utf8(record.sequence().to_vec()).unwrap());
+                pluss.push(String::from_utf8(record.plus().to_vec()).unwrap());
+                quals.push(String::from_utf8(record.quality().to_vec()).unwrap());
             }
-
-            assert_eq!(block_length, vec![65300, 65520, 65520, 65520, 49920]);
-
-            Ok(())
         }
 
-        #[test]
-        fn check_block() -> error::Result<()> {
-            let file = crate::tests::generate_fastq(42, 100, 150)?;
+        assert_eq!(
+            comments,
+            vec![
+                "@GSWNPZYBHL atbbutlfemxuzgaghmwn".to_string(),
+                "@LHABRFOIPY kuougqcoherrilpylxga".to_string(),
+                "@PHYALDFVGY kzhdadxmhhvhzlvxulto".to_string(),
+                "@UWWIFBAZNV hmqfbhzkizjnwzyvreoi".to_string(),
+                "@ETFPQPBCGR uiwejacxekdfeoxhehyv".to_string(),
+                "@OXRTYXGRDF nagvxtzlfvryzktzbvur".to_string(),
+                "@WWMYBRMIVZ utdjngxdvdwshbpjuvvr".to_string(),
+                "@JIGLPJJGED cphroskdsgmlwqixchga".to_string(),
+                "@DEPZJRDOQP mdadqdzktocmqeqfubqc".to_string(),
+                "@DKYULMZDLL qgqrqlfpzyvfawnwhibf".to_string(),
+            ]
+        );
+        assert_eq!(
+            seqs,
+            vec![
+                "gccAcggtAatGcTtgtaCgcAGgAtaTcgAAtTaTaGaTggttGCtCat".to_string(),
+                "ActTgCGAcaAgaAAtaTCCcAgagggaCcttCcGcTTGcgAACcTtCtt".to_string(),
+                "GCatAGGACAAaacTaTTagagGtatAGCcTatTtaaaaCGgcttGGTtg".to_string(),
+                "CcCGtCtATgTTgTATcaTTCGaCCttcAaGCGCAatgaTGAtaatcaCt".to_string(),
+                "caacCATAtGtGgtAtacAagtTGgAtgcGtTCtctTgctTtcGggATtc".to_string(),
+                "AttaTtGgCACgCcgcCgATtcGCaTatTGGGCTacgtgACCGttTCAtt".to_string(),
+                "cTGAAccCaaAcacagCATCTaTCgGcgcaGCaCaTATTacCGaTtgttC".to_string(),
+                "CatTagaCtTTtccCCcAgagtctAGCCtCTgATTtTGCcGcGgCgTcGc".to_string(),
+                "gGtAGgATcAaGactACcGCAaatGtTgCtaccTaCGCgGGaacgaCcAt".to_string(),
+                "TCatCGgcAgaaagtTACacgcggaCcTAccaaGgGCAAGtGcccCgaGc".to_string(),
+            ]
+        );
+        assert_eq!(
+            pluss,
+            vec![
+                "+Wognt".to_string(),
+                "+gGXi[".to_string(),
+                "+T_IlS".to_string(),
+                "+eGSa[".to_string(),
+                "+YcBuG".to_string(),
+                "+P_hBj".to_string(),
+                "+jXNUP".to_string(),
+                "+R`mig".to_string(),
+                "+SQrSl".to_string(),
+                "+NS^fl".to_string(),
+            ]
+        );
+        assert_eq!(
+            quals,
+            vec![
+                "/&411+!)AF,E;7.8.3GF2%\"%:4%#<399BE%$8900(08#,.;&2*".to_string(),
+                ">B4-?CG@!GI!(?\"1'%))7&08<27F?3AA$E(/@A#FBBF<')G+%2".to_string(),
+                "?\"))&?,%6;GG@D-.4G5+%$8H>&%@72B;''I:>+.*\"G.$8E&./=".to_string(),
+                "!20/(B?(5\"/FC.D7*-I,%#G%;4\"7->$D@6=,C2\"')7G0FA-+I'".to_string(),
+                "9?A)>5,>E6G9<E+4@)D+\")9@>;B3#.FG;:.#21\"I378/0G=377".to_string(),
+                "17?)A$AA#C\"DI%H3F/9;'H1G93#'+4<AF/$*B,52-@!C=\"G<63".to_string(),
+                "8,%$'\"6.>:#-'G1BH11)&97>HI0D#(96H.0D0G1'(FDG::-;4\"".to_string(),
+                "7C\"&C?\"=A46?D9I1=<1345'/-;%F6363*70@$1;:80>497,@1>".to_string(),
+                "$.G-\"4?(-H&%,7<>;EE4F%00#5H2B45;2*/=I:;=36H5$%C(08".to_string(),
+                "4C+*#).<?3?1?3.??.=E:&*--;G2.?AIC('D$81H@5A;=$*D<3".to_string(),
+            ]
+        );
 
-            let mut tmp = Producer::with_blocksize(800, file)?;
+        Ok(())
+    }
 
-            assert_eq!(
-                String::from_utf8(tmp.next_block()?.unwrap().data().to_vec()),
-                Ok("@0
-TTAGATTATAGTACGGTATAGTGGTTACTATGTAGCCTAAGTGGCGCCCGTTGTAGAGGAATCCACTTATATAACACAGGTATAATCCGGACGGCATGCGCAGGCATGCCTATATTCTATGACAGCAGGATTATGGAAGATGGTGCTCTA
-+0
-^U3<L0PV{cnrl:8N`!:=mF8M0!0Ez/d{4j$=9f5rLeAQ-H.ptT3w6aMy8Z6O-dZ}2`UX=YJ-Etg`s&B%~F!kR7S8]@lTI<2-\\';v0}hU.(T*0VHGx,>Gze)*5rFv}k@RllOE2K)\"DQJvO)bl?(dDhh
-@1
-AGTTATCGTGTACCTCCTAGCTTTTAGTTGTGCTTTAACAGTGTAACATTGGGACGCTATTACTCGCCGGTGAGGCGGTCTTCCTTGACTATACCGATCGTGGAGTTCATGCGCGCGGATCCCTCAGCGTTCTCGGGAAGCGCGAACAGA
-+1
-iCW?:KL~15\\E|MNRKY)S$?~~Ub}d)dY2LX:e@b^'<<$$e56W0fdV,<Y>Yd(J<5p6xt)z+OxuPXv?/_yH8z^%Sks1*nxm$<7*YdkvNPf:>YW=$uxZ)}[v/DlZm&EW(s(cMelx\"iEV3Hp]cz3%_T@\\Ms
-".to_string())
-            );
-            assert_eq!(
-                String::from_utf8(tmp.next_block()?.unwrap().data().to_vec()),
-                Ok("@2
-AATGTCCCTCAATCCGCGGCATGGCTAAGTACCACCGTGGATGTAAATTTTTCAGTCGTCTCTTCATACTGTTCCTGTACTGTCAGGGATGCTCCCTTTCACAGAGCTCGTATAATCAGTAAACGCCACGGTCCTTTCTCTGTTAACCGC
-+2
-Ouf)Y|l;S1!tk[U9n2(NK=#Tmg,t+CSsUMaPs7{+V'~On{hc1NR}aY^YbYlg[}Fcq1K_$v1HG\"tRBj`||g>\\)2pU_QrnWO{c@;lw8B0+urH~$#K>:iSa-I-C#gDJ(9UUFubOeRHsDX3Ko`?T--iL+j
-@3
-TTGGGCATGAGGTTCACCGAAGGTGGCAGATATGCGCCATAAATTGACCAGGTTGTATCCAGCATTGGAAGAACGCACCCGGGGGGAGCACAGATCCTAGCAGTACACGCTCTGGGTCCTCTACGTCTTCGGAGTCTCTAGCTTGCCTTA
-+3
-:~vGLKg+n!*iJ\\.*wfxK)5Qmh%<:f^$nql7OB$}M/d.F,5[=>ZW*#f=0>Ao(@~lEHbSG1%,b_Uy2!zL%2GMB0O.t[#UcQ[]ufFZJ!K<kLgDNQlx)s8+75E^[-\"!1l[i<S#G\"B]xZ5?as*@8Laq`{@r
-".to_string())
-            );
-            assert_eq!(
-                String::from_utf8(tmp.next_block()?.unwrap().data().to_vec()),
-                Ok("@4
-TCTATAGCTTGTCATGCCTTTCGATTGAGGGCGTCACCAAGCGAATTACTCGCTGATCCGTTCCCCGCCAATTCTGAGACTCCATAATCCTATCTGTGTCCCTAGGTGCCGTGTTCCGGTCGTGAGTTCGGCCCTTGCCTAAAGTTAATG
-+4
-myS=C|jEWnl,aC\\7!jv9[!vh/PAK}_H&<.o]qf|y@4L:?ssLg3N!v7/N5RyPHn=5%Fyh(4-Z:<6wf]^#t~0:i(X\\l-7]9olH9WLV~`L~JQ7ye7B1RSi2N$PuHwjj\\pb}J\\R~pe?j+X>R#p@MyqBBe*
-".to_string())
-            );
-            assert!(tmp.next_block().is_ok());
-            assert!(tmp.next_block().unwrap().is_none());
+    #[cfg(feature = "derive")]
+    #[test]
+    fn quality_is_shit() -> error::Result<()> {
+        let data = b"@1\nAA\n+1\n!!\n@2\nTT\n+2\n!!";
+        assert_eq!(File2Block::correct_block_size(data)?, 12);
 
-            Ok(())
-        }
+        let data = b"@1\nAA\n+1\n!!\n@2\nTT\n+2\n+!\n@3";
+        assert_eq!(File2Block::correct_block_size(data)?, 24);
 
-        #[test]
-        fn quality_is_shit() -> error::Result<()> {
-            let data = b"@1\nAA\n+1\n!!\n@2\nTT\n+2\n!!";
-            assert_eq!(Producer::correct_block_size(data)?, 12);
+        let data = b"@1\nAA\n+1\n!!\n@2\nTT\n+2\n@!";
+        assert_eq!(File2Block::correct_block_size(data)?, 12);
 
-            let data = b"@1\nAA\n+1\n!!\n@2\nTT\n+2\n+!\n@3";
-            assert_eq!(Producer::correct_block_size(data)?, 24);
+        Ok(())
+    }
 
-            let data = b"@1\nAA\n+1\n!!\n@2\nTT\n+2\n@!";
-            assert_eq!(Producer::correct_block_size(data)?, 12);
+    #[cfg(feature = "derive")]
+    #[test]
+    fn not_a_fastq() -> error::Result<()> {
+        let temp = tempfile::NamedTempFile::new()?;
 
-            Ok(())
-        }
-
-        #[test]
-        fn not_a_fastq() -> error::Result<()> {
-            let mut file = crate::tests::write_in_tempfile(
-                b"@0
+        let mut data = b"@0
 TTAGATTATAGTACGG
 ATTATAT
 +1
@@ -252,101 +372,44 @@ AGTTATCGTGTACCTC
 +CW?:KL~15\\E|MN
 GTCCCTCAATCCG
 +2
-",
-            )?;
+"
+        .to_vec();
 
-            let mut producer = Producer::with_blocksize(82, file)?;
+        {
+            let mut file = std::io::BufWriter::new(std::fs::File::create(&temp.path())?);
+            file.write_all(&data)?;
+        }
 
-            assert!(producer.next_block().is_err());
+        let mut blocks = File2Block::with_blocksize(82, temp.path())?;
 
-            {
-                let mut rewrite = file.reopen().unwrap();
-                rewrite.write(
-                    b"+FAILLED FILE
+        println!("{:?} {}", String::from_utf8(data.clone()), data.len());
+        let result = blocks.next_block();
+        println!("{:?}", result);
+        assert!(result.is_err());
+
+        data.extend(
+            b"+FAILLED FILE
 +3
 +TTGGGCATGAGGTTCA
 @3ueauie
 +~vGLKg+n!*iJ\\K
 @iuiea
 ",
-                )?;
-            }
+        );
 
-            let mut producer = Producer::with_blocksize(82, file)?;
-
-            assert!(producer.next_block().is_err());
-
-            let mut producer = Producer::with_blocksize(82, file)?;
-            assert!(producer.next().is_some());
-            assert!(producer.next().unwrap().is_err());
-
-            Ok(())
+        {
+            let mut file = std::io::BufWriter::new(std::fs::File::create(&temp.path())?);
+            file.write_all(&data)?;
         }
-    }
 
-    mod reader {
-        use super::*;
+        let mut blocks = File2Block::with_blocksize(82, temp.path())?;
 
-        #[test]
-        fn iterate_over_seq() -> error::Result<()> {
-            let mut file = crate::tests::generate_fasta(42, 5, 150)?;
-            let mut producer = Producer::with_blocksize(500, file)?;
+        assert!(blocks.next_block().is_err());
 
-            let mut comments = Vec::new();
-            let mut seqs = Vec::new();
-            let mut pluss = Vec::new();
-            let mut quals = Vec::new();
+        let mut blocks = File2Block::with_blocksize(82, temp.path())?;
+        assert!(blocks.next().is_some());
+        assert!(blocks.next().unwrap().is_err());
 
-            while let Ok(Some(block)) = producer.next_block() {
-                let mut reader = Reader::new(block);
-
-                while let Ok(Some(record)) = reader.next_record() {
-                    comments.push(String::from_utf8(record.comment.to_vec()).unwrap());
-                    seqs.push(String::from_utf8(record.sequence.to_vec()).unwrap());
-                    pluss.push(String::from_utf8(record.plus.to_vec()).unwrap());
-                    quals.push(String::from_utf8(record.quality.to_vec()).unwrap());
-                }
-            }
-
-            assert_eq!(
-                comments,
-                vec![
-                    "@0".to_string(),
-                    "@1".to_string(),
-                    "@2".to_string(),
-                    "@3".to_string(),
-                    "@4".to_string()
-                ]
-            );
-            assert_eq!(
-                seqs,
-                vec![
-		    "TTAGATTATAGTACGGTATAGTGGTTACTATGTAGCCTAAGTGGCGCCCGTTGTAGAGGAATCCACTTATATAACACAGGTATAATCCGGACGGCATGCGCAGGCATGCCTATATTCTATGACAGCAGGATTATGGAAGATGGTGCTCTA".to_string(),
-		    "AGTTATCGTGTACCTCCTAGCTTTTAGTTGTGCTTTAACAGTGTAACATTGGGACGCTATTACTCGCCGGTGAGGCGGTCTTCCTTGACTATACCGATCGTGGAGTTCATGCGCGCGGATCCCTCAGCGTTCTCGGGAAGCGCGAACAGA".to_string(),
-		    "AATGTCCCTCAATCCGCGGCATGGCTAAGTACCACCGTGGATGTAAATTTTTCAGTCGTCTCTTCATACTGTTCCTGTACTGTCAGGGATGCTCCCTTTCACAGAGCTCGTATAATCAGTAAACGCCACGGTCCTTTCTCTGTTAACCGC".to_string(), "TTGGGCATGAGGTTCACCGAAGGTGGCAGATATGCGCCATAAATTGACCAGGTTGTATCCAGCATTGGAAGAACGCACCCGGGGGGAGCACAGATCCTAGCAGTACACGCTCTGGGTCCTCTACGTCTTCGGAGTCTCTAGCTTGCCTTA".to_string(), "TCTATAGCTTGTCATGCCTTTCGATTGAGGGCGTCACCAAGCGAATTACTCGCTGATCCGTTCCCCGCCAATTCTGAGACTCCATAATCCTATCTGTGTCCCTAGGTGCCGTGTTCCGGTCGTGAGTTCGGCCCTTGCCTAAAGTTAATG".to_string()     ]
-            );
-            assert_eq!(
-                pluss,
-                vec![
-                    "+0".to_string(),
-                    "+1".to_string(),
-                    "+2".to_string(),
-                    "+3".to_string(),
-                    "+4".to_string()
-                ]
-            );
-            assert_eq!(
-                quals,
-                vec![
-		    "^U3<L0PV{cnrl:8N`!:=mF8M0!0Ez/d{4j$=9f5rLeAQ-H.ptT3w6aMy8Z6O-dZ}2`UX=YJ-Etg`s&B%~F!kR7S8]@lTI<2-\\';v0}hU.(T*0VHGx,>Gze)*5rFv}k@RllOE2K)\"DQJvO)bl?(dDhh".to_string(),
-		    "iCW?:KL~15\\E|MNRKY)S$?~~Ub}d)dY2LX:e@b^'<<$$e56W0fdV,<Y>Yd(J<5p6xt)z+OxuPXv?/_yH8z^%Sks1*nxm$<7*YdkvNPf:>YW=$uxZ)}[v/DlZm&EW(s(cMelx\"iEV3Hp]cz3%_T@\\Ms".to_string(),
-		    "Ouf)Y|l;S1!tk[U9n2(NK=#Tmg,t+CSsUMaPs7{+V'~On{hc1NR}aY^YbYlg[}Fcq1K_$v1HG\"tRBj`||g>\\)2pU_QrnWO{c@;lw8B0+urH~$#K>:iSa-I-C#gDJ(9UUFubOeRHsDX3Ko`?T--iL+j".to_string(),
-		    ":~vGLKg+n!*iJ\\.*wfxK)5Qmh%<:f^$nql7OB$}M/d.F,5[=>ZW*#f=0>Ao(@~lEHbSG1%,b_Uy2!zL%2GMB0O.t[#UcQ[]ufFZJ!K<kLgDNQlx)s8+75E^[-\"!1l[i<S#G\"B]xZ5?as*@8Laq`{@r".to_string(),
-		    "myS=C|jEWnl,aC\\7!jv9[!vh/PAK}_H&<.o]qf|y@4L:?ssLg3N!v7/N5RyPHn=5%Fyh(4-Z:<6wf]^#t~0:i(X\\l-7]9olH9WLV~`L~JQ7ye7B1RSi2N$PuHwjj\\pb}J\\R~pe?j+X>R#p@MyqBBe*".to_string(),
-		]
-            );
-
-            Ok(())
-        }
+        Ok(())
     }
 }

@@ -1,0 +1,23 @@
+[package]
+name = "biommap_derive"
+version = "0.1.0"
+edition = "2021"
+
+description = "Proc macro crate of biommap crate"
+rust-version = "1.60"
+
+homepage = "https://github.com/natir/biommap"
+repository = "https://github.com/natir/biommap"
+documentation = "https://natir.github.io/biommap/biommap"
+
+readme = "../Readme.md"
+license-file = "../LICENSE"
+
+[lib]
+proc_macro = true
+
+[dependencies]
+# Proc macro
+proc-macro2    = { version = "1" }
+syn            = { version = "2", features = ["full"] }
+quote          = { version = "1" }

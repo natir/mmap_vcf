@@ -3,8 +3,8 @@ name = "biommap"
 version = "0.1.0"
 authors = ["Pierre Marijon <pierre@marijon.fr>"]
 edition = "2021"
-description = "Ar efficient bioinformatics file parser based on memory mapping of file."
-rust-version = "1.60"
+description = "An efficient bioinformatics file parser based on memory mapping of file."
+rust-version = "1.74"
 
 homepage = "https://github.com/natir/biommap"
 repository = "https://github.com/natir/biommap"
@@ -16,23 +16,22 @@ license-file = "LICENSE"
 
 [features]
 default      = []
-fasta        = ["bstr", "memchr"]
-fastq        = ["bstr", "memchr"]
-vcf          = ["bstr", "memchr"]
-shared_state = ["rayon"]
-macro        = ["syn", "quote"]
+fasta        = ["dep:bstr", "dep:memchr"]
+fastq        = ["dep:bstr", "dep:memchr"]
+vcf          = ["dep:bstr", "dep:memchr"]
+parallel     = ["dep:rayon"]
+shared_state = ["parallel"]
+derive       = ["dep:biommap_derive"]
 
 
 [dependencies]
-memmap2        = { version = "0.5" }
+biommap_derive = { path = "biommap_derive", optional = true }
+
+memmap2        = { version = "0.9" }
 
 # String manipulation
 bstr           = { version = "1", optional = true }
 memchr         = { version = "2", optional = true }
-
-# Proc macro
-syn            = { version = "1", optional = true }
-quote          = { version = "1", optional = true }
 
 # Parallel management
 rayon          = { version = "1", optional = true }
@@ -40,22 +39,48 @@ rayon          = { version = "1", optional = true }
 # Error management
 thiserror      = { version = "1" }
 
-# Logging and error management
+# Logging management
 log            = { version = "0.4" }
 
 [dev-dependencies]
 # Benchmarking
-criterion      = { version = "0.3" }
+criterion      = { version = "0.5" }
+needletail     = { version = "0.5" }
 
 # Test
 rand           = { version = "0.8" }
 tempfile       = { version = "3" }
+assert_matches = { version = "1" }
+biotest        = {  git = "https://github.com/natir/biotest.git", features = ["fasta", "fastq"] }
 
 # CLI management
-clap           = { version = "3", features = ["derive"] }
+clap           = { version = "4", features = ["derive"] }
 
 # Logging management
-stderrlog      = { version = "0.4" }
+stderrlog      = { version = "0.5" }
+
+# Error management
+anyhow         = { version = "1" }
+
+
+[[example]]
+name = "count_records"
+required-features = ["fasta", "fastq", "derive"]
+
+
+[[example]]
+name = "count_records_needletail"
+
+
+[[bench]]
+name = "fasta"
+harness = false
+required-features = ["fasta", "derive"]
+
+[[bench]]
+name = "fastq"
+harness = false
+required-features = ["fastq", "derive"]
 
 
 [profile.release]
