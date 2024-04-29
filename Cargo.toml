@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Pierre Marijon <pierre@marijon.fr>"]
 edition = "2021"
 description = "An efficient bioinformatics file parser based on memory mapping of file."
-rust-version = "1.70"
+rust-version = "1.74"
 
 homepage = "https://github.com/natir/biommap"
 repository = "https://github.com/natir/biommap"
