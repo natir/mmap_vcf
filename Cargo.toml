@@ -67,8 +67,21 @@ anyhow         = { version = "1" }
 name = "count_records"
 required-features = ["fasta", "fastq", "derive"]
 
+
 [[example]]
 name = "count_records_needletail"
+
+
+[[bench]]
+name = "fasta"
+harness = false
+required-features = ["fasta", "derive"]
+
+[[bench]]
+name = "fastq"
+harness = false
+required-features = ["fastq", "derive"]
+
 
 [profile.release]
 lto = 'thin'
