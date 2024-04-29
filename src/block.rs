@@ -54,6 +54,9 @@ mod tests {
     /* std use */
     use core::ops::Deref;
 
+    /* crate use */
+    use biotest::Format as _;
+
     /* project use */
     use crate::error;
 
@@ -62,14 +65,17 @@ mod tests {
 
     #[test]
     fn ram() -> error::Result<()> {
-        let mut rng = crate::tests::generator::rng();
-        let data = crate::tests::generator::fasta(&mut rng, 150, 5);
+        let mut rng = biotest::rand();
+        let mut data = Vec::new();
+        let generator = biotest::Fasta::builder().build().unwrap();
+
+        generator.records(&mut data, &mut rng, 5).unwrap();
 
         let block = Block::new(data.clone(), 300);
 
         assert_eq!(block.data(), &data[..300]);
         assert_eq!(block.remain(), &data[300..]);
-        assert_eq!(block.remain().len(), 470);
+        assert_eq!(block.remain().len(), 620);
         assert!(!block.is_empty());
 
         Ok(())
@@ -78,9 +84,10 @@ mod tests {
     #[test]
     fn mmap() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().build().unwrap();
 
-        crate::tests::io::write_fasta(&mut rng, 150, 5, temp.path())?;
+        generator.create(temp.path(), &mut rng, 5).unwrap();
 
         let data = unsafe {
             memmap2::MmapOptions::new()

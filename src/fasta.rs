@@ -66,6 +66,9 @@ pub fn fasta(&mut self) -> error::Result<Option<Record<'_>>> {
 mod tests {
     /* std use */
 
+    /* crates use */
+    use biotest::Format as _;
+
     /* project use */
     use crate::error;
 
@@ -76,21 +79,23 @@ mod tests {
     #[test]
     fn default() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fasta(&mut rng, 150, 100, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(50).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
         let mut producer = File2Block::new(temp.path())?;
 
         let option = producer.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 8050);
+        assert_eq!(block.len(), 8148);
 
         let option = producer.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 7440);
+        assert_eq!(block.len(), 252);
 
         let option = producer.next_block()?;
         assert!(option.is_none());
@@ -102,16 +107,18 @@ mod tests {
     #[test]
     fn blocksize() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fasta(&mut rng, 150, 100, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(50).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
         let mut producer = File2Block::with_blocksize(8192 * 2, temp.path())?;
 
         let option = producer.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 15490);
+        assert_eq!(block.len(), 8400);
 
         let option = producer.next_block()?;
         assert!(option.is_none());
@@ -123,16 +130,18 @@ mod tests {
     #[test]
     fn offset() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fasta(&mut rng, 150, 100, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(50).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
         let mut producer = File2Block::with_offset(8050, temp.path())?;
 
         let option = producer.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 7440);
+        assert_eq!(block.len(), 350);
 
         let option = producer.next_block()?;
         assert!(option.is_none());
@@ -144,21 +153,23 @@ mod tests {
     #[test]
     fn blocksize_offset() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fasta(&mut rng, 150, 100, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(100).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
         let mut producer = File2Block::with_blocksize_offset(4096, 8050, temp.path())?;
 
         let option = producer.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 4030);
+        assert_eq!(block.len(), 4010);
 
         let option = producer.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 3410);
+        assert_eq!(block.len(), 1340);
 
         let option = producer.next_block()?;
         assert!(option.is_none());
@@ -170,9 +181,11 @@ mod tests {
     #[test]
     fn records() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fasta(&mut rng, 50, 10, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fasta::builder().sequence_len(50).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 10).unwrap();
 
         let mut comments = Vec::new();
         let mut seqs = Vec::new();
@@ -191,31 +204,31 @@ mod tests {
         assert_eq!(
             comments,
             vec![
-                ">0".to_string(),
-                ">1".to_string(),
-                ">2".to_string(),
-                ">3".to_string(),
-                ">4".to_string(),
-                ">5".to_string(),
-                ">6".to_string(),
-                ">7".to_string(),
-                ">8".to_string(),
-                ">9".to_string()
+                ">GSWNPZYBHL atbbutlfemxuzgaghmwn".to_string(),
+                ">RCUDMHKKGS ajefuxhqoiwnooilwywl".to_string(),
+                ">RVOLOAYNLY acavbgerslbixoxxodry".to_string(),
+                ">CLCUXEJUUO bxvvxhrfygckrphyaldf".to_string(),
+                ">UNLMOTCONV zzkwrudmkpkjusxndtiw".to_string(),
+                ">IZJNWZYVRE oizferdlsseuahsvxvjh".to_string(),
+                ">MOHSCWTGTN hvlfyxahfdjoyxuahmga".to_string(),
+                ">MELUFGTSRI ugyirugryxamshjpzprp".to_string(),
+                ">AGVXTZLFVR yzktzbvurjcfibwtjutf".to_string(),
+                ">ASKDOTFRUC uubdjpvcftawzzlxspaf".to_string()
             ]
         );
         assert_eq!(
             seqs,
             vec![
-                "taTATgAAtCGCgtGTTAGTTAagccAcggtAatGcTtgtaCgcAGgAta".to_string(),
-                "TcgAAtTaTaGaTggttGCtCatGtctgCTGGTACtgTgcaaaagggGAG".to_string(),
-                "acAtgCtGCAAtTacCGtTAAcaGGtatTCaTCctcTGgAActTgCGAca".to_string(),
-                "AgaAAtaTCCcAgagggaCcttCcGcTTGcgAACcTtCttAacGtTtAtG".to_string(),
-                "TgACAGCCaCGctGagattTGtgCttaAGggTcCTGcGTAGCTGTCCACg".to_string(),
-                "TTTGagtGaGCatAGGACAAaacTaTTagagGtatAGCcTatTtaaaaCG".to_string(),
-                "gcttGGTtgaCtgACTacgtCTaTgTCAGgCtaGTtcCCTcgcTgAgGgA".to_string(),
-                "tCAAatTCTATTGTaggcGCaCcCGtCtATgTTgTATcaTTCGaCCttcA".to_string(),
-                "aGCGCAatgaTGAtaatcaCtGcTAGCCAgaTTgcAaTtaTGgACTTagG".to_string(),
-                "gtATACCtcTctCAtgCGCagTCTcaacCATAtGtGgtAtacAagtTGgA".to_string()
+                "gccAcggtAatGcTtgtaCgcAGgAtaTcgAAtTaTaGaTggttGCtCat".to_string(),
+                "AGacAtgCtGCAAtTacCGtTAAcaGGtatTCaTCctcTGgAActTgCGA".to_string(),
+                "ttCcGcTTGcgAACcTtCttAacGtTtAtGTgACAGCCaCGctGagattT".to_string(),
+                "TGTCCACgTTTGagtGaGCatAGGACAAaacTaTTagagGtatAGCcTat".to_string(),
+                "ACTacgtCTaTgTCAGgCtaGTtcCCTcgcTgAgGgAtCAAatTCTATTG".to_string(),
+                "ATcaTTCGaCCttcAaGCGCAatgaTGAtaatcaCtGcTAGCCAgaTTgc".to_string(),
+                "CCtcTctCAtgCGCagTCTcaacCATAtGtGgtAtacAagtTGgAtgcGt".to_string(),
+                "AgtaTgacgtCCTAtActaGAggcAAGGACGaATctgCaaatgctgTcCa".to_string(),
+                "aTtGgCACgCcgcCgATtcGCaTatTGGGCTacgtgACCGttTCAttTac".to_string(),
+                "GgACTctgTGTtaAGCAgcagAcGttCagTgCTAtccTGAAccCaaAcac".to_string(),
             ]
         );
 
@@ -226,11 +239,13 @@ mod tests {
     #[test]
     fn not_fasta() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fastq(&mut rng, 50, 2, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().build().unwrap();
 
-        let mut producer = File2Block::with_blocksize(100, temp.path())?;
+        generator.create(temp.path(), &mut rng, 100).unwrap();
+
+        let mut producer = File2Block::with_blocksize(200, temp.path())?;
 
         let result = producer.next_block();
         assert_matches::assert_matches!(result, Err(error::Error::NotAFastaFile));

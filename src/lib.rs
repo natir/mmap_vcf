@@ -15,9 +15,6 @@ pub mod block;
 
 pub mod error;
 
-#[cfg(test)]
-pub mod tests;
-
 #[cfg(feature = "fasta")]
 pub mod fasta;
 

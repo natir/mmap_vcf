@@ -109,6 +109,10 @@ pub fn fastq(&mut self) -> error::Result<Option<Record<'_>>> {
 #[cfg(test)]
 mod tests {
     /* std use */
+    use std::io::Write as _;
+
+    /* crates use */
+    use biotest::Format as _;
 
     /* project use */
 
@@ -119,31 +123,38 @@ mod tests {
     #[test]
     fn default() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fastq(&mut rng, 150, 100, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(150).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
         let mut blocks = File2Block::new(temp.path())?;
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 7998);
+        assert_eq!(block.len(), 7866);
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 8008);
+        assert_eq!(block.len(), 7866);
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 8008);
+        assert_eq!(block.len(), 7866);
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 6776);
+        assert_eq!(block.len(), 7866);
+
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 2736);
 
         let option = blocks.next_block()?;
         assert!(option.is_none());
@@ -155,21 +166,28 @@ mod tests {
     #[test]
     fn blocksize() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fastq(&mut rng, 150, 100, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(150).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
         let mut blocks = File2Block::with_blocksize(8192 * 2, temp.path())?;
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 16314);
+        assert_eq!(block.len(), 16074);
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 14476);
+        assert_eq!(block.len(), 16074);
+
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 2052);
 
         let option = blocks.next_block()?;
         assert!(option.is_none());
@@ -181,16 +199,18 @@ mod tests {
     #[test]
     fn offset() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fastq(&mut rng, 150, 100, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(150).build().unwrap();
 
-        let mut blocks = File2Block::with_offset(24014, temp.path())?;
+        generator.create(temp.path(), &mut rng, 10).unwrap();
+
+        let mut blocks = File2Block::with_offset(1000, temp.path())?;
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 6776);
+        assert_eq!(block.len(), 2420);
 
         let option = blocks.next_block()?;
         assert!(option.is_none());
@@ -202,21 +222,28 @@ mod tests {
     #[test]
     fn blocksize_offset() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fastq(&mut rng, 150, 100, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(150).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 100).unwrap();
 
         let mut blocks = File2Block::with_blocksize_offset(4096, 24014, temp.path())?;
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 4004);
+        assert_eq!(block.len(), 4030);
 
         let option = blocks.next_block()?;
         assert!(option.is_some());
         let block = option.unwrap();
-        assert_eq!(block.len(), 2772);
+        assert_eq!(block.len(), 3762);
+
+        let option = blocks.next_block()?;
+        assert!(option.is_some());
+        let block = option.unwrap();
+        assert_eq!(block.len(), 2394);
 
         let option = blocks.next_block()?;
         assert!(option.is_none());
@@ -228,9 +255,11 @@ mod tests {
     #[test]
     fn records() -> error::Result<()> {
         let temp = tempfile::NamedTempFile::new()?;
-        let mut rng = crate::tests::generator::rng();
 
-        crate::tests::io::write_fastq(&mut rng, 50, 10, temp.path())?;
+        let mut rng = biotest::rand();
+        let generator = biotest::Fastq::builder().sequence_len(50).build().unwrap();
+
+        generator.create(temp.path(), &mut rng, 10).unwrap();
 
         let mut comments = Vec::new();
         let mut seqs = Vec::new();
@@ -253,61 +282,61 @@ mod tests {
         assert_eq!(
             comments,
             vec![
-                "@0".to_string(),
-                "@1".to_string(),
-                "@2".to_string(),
-                "@3".to_string(),
-                "@4".to_string(),
-                "@5".to_string(),
-                "@6".to_string(),
-                "@7".to_string(),
-                "@8".to_string(),
-                "@9".to_string()
+                "@GSWNPZYBHL atbbutlfemxuzgaghmwn".to_string(),
+                "@LHABRFOIPY kuougqcoherrilpylxga".to_string(),
+                "@PHYALDFVGY kzhdadxmhhvhzlvxulto".to_string(),
+                "@UWWIFBAZNV hmqfbhzkizjnwzyvreoi".to_string(),
+                "@ETFPQPBCGR uiwejacxekdfeoxhehyv".to_string(),
+                "@OXRTYXGRDF nagvxtzlfvryzktzbvur".to_string(),
+                "@WWMYBRMIVZ utdjngxdvdwshbpjuvvr".to_string(),
+                "@JIGLPJJGED cphroskdsgmlwqixchga".to_string(),
+                "@DEPZJRDOQP mdadqdzktocmqeqfubqc".to_string(),
+                "@DKYULMZDLL qgqrqlfpzyvfawnwhibf".to_string(),
             ]
         );
         assert_eq!(
             seqs,
             vec![
-                "taTATgAAtCGCgtGTTAGTTAagccAcggtAatGcTtgtaCgcAGgAta".to_string(),
-                "agggGAGacAtgCtGCAAtTacCGtTAAcaGGtatTCaTCctcTGgAAct".to_string(),
-                "GtTtAtGTgACAGCCaCGctGagattTGtgCttaAGggTcCTGcGTAGCT".to_string(),
-                "AGCcTatTtaaaaCGgcttGGTtgaCtgACTacgtCTaTgTCAGgCtaGT".to_string(),
-                "CtATgTTgTATcaTTCGaCCttcAaGCGCAatgaTGAtaatcaCtGcTAG".to_string(),
-                "tgCGCagTCTcaacCATAtGtGgtAtacAagtTGgAtgcGtTCtctTgct".to_string(),
-                "tgCaaatgctgTcCaAgttcGtGAtcAttaTtGgCACgCcgcCgATtcGC".to_string(),
-                "gAcCGgACTctgTGTtaAGCAgcagAcGttCagTgCTAtccTGAAccCaa".to_string(),
-                "ttCGTTaGccGaCAaGCGGATCgGGGATCaAaGcaACCGaTcGGCCGgGa".to_string(),
-                "tAGCCtCTgATTtTGCcGcGgCgTcGcTatcaaaACTaaGATtaaGaAcg".to_string(),
+                "gccAcggtAatGcTtgtaCgcAGgAtaTcgAAtTaTaGaTggttGCtCat".to_string(),
+                "ActTgCGAcaAgaAAtaTCCcAgagggaCcttCcGcTTGcgAACcTtCtt".to_string(),
+                "GCatAGGACAAaacTaTTagagGtatAGCcTatTtaaaaCGgcttGGTtg".to_string(),
+                "CcCGtCtATgTTgTATcaTTCGaCCttcAaGCGCAatgaTGAtaatcaCt".to_string(),
+                "caacCATAtGtGgtAtacAagtTGgAtgcGtTCtctTgctTtcGggATtc".to_string(),
+                "AttaTtGgCACgCcgcCgATtcGCaTatTGGGCTacgtgACCGttTCAtt".to_string(),
+                "cTGAAccCaaAcacagCATCTaTCgGcgcaGCaCaTATTacCGaTtgttC".to_string(),
+                "CatTagaCtTTtccCCcAgagtctAGCCtCTgATTtTGCcGcGgCgTcGc".to_string(),
+                "gGtAGgATcAaGactACcGCAaatGtTgCtaccTaCGCgGGaacgaCcAt".to_string(),
+                "TCatCGgcAgaaagtTACacgcggaCcTAccaaGgGCAAGtGcccCgaGc".to_string(),
             ]
         );
         assert_eq!(
             pluss,
             vec![
-                "+".to_string(),
-                "+".to_string(),
-                "+".to_string(),
-                "+".to_string(),
-                "+".to_string(),
-                "+".to_string(),
-                "+".to_string(),
-                "+".to_string(),
-                "+".to_string(),
-                "+".to_string(),
+                "+Wognt".to_string(),
+                "+gGXi[".to_string(),
+                "+T_IlS".to_string(),
+                "+eGSa[".to_string(),
+                "+YcBuG".to_string(),
+                "+P_hBj".to_string(),
+                "+jXNUP".to_string(),
+                "+R`mig".to_string(),
+                "+SQrSl".to_string(),
+                "+NS^fl".to_string(),
             ]
         );
         assert_eq!(
             quals,
             vec![
-                "=EC!:3@9D-41D6.E/%/>BA30'>(7B1B%AE'5-2,>!0(AFE;D68".to_string(),
-                "G&&'2<CH8#GH?!%!4B7,:$)8F8=@@D<+295-<F?.#>CI4@#7<&".to_string(),
-                "1-(!'F--C-I3C7EA3?72.C(!12#(!I#;->%+%7+.:6GI6E3@CB".to_string(),
-                "B(I+;=,/+#G%1)E0#A(D*#I6B.(-5$-.I.I07EIGC<(/=='1B>".to_string(),
-                ")/)C#0F+I-&$G&4#%D@+=-C*F#,-*0G1FA5?I()@9:&,=A/(0!".to_string(),
-                "@1F5>-9BH=9F?+*>38->/G/E@(,#*>B82$0/FG:/$#DI240.G=".to_string(),
-                "%6,8$-125'B8,7:G/?;?C$H'2AB%-0'B*4A#',?*=%AA$0:C#D".to_string(),
-                "!</6DI7G*'&#.'%-I6.G?:<F718>8C#47/(36*D5,BIHD4++F9".to_string(),
-                "<#0/,00<?8<>E5.3#/EB&,'B.$%6G?E*)--H@;;(<#CG:8FB09".to_string(),
-                "73I55(+37.>0;&FF1474%;:/81>59@9>%(H0'8;95!<)8(;*;%".to_string(),
+                "/&411+!)AF,E;7.8.3GF2%\"%:4%#<399BE%$8900(08#,.;&2*".to_string(),
+                ">B4-?CG@!GI!(?\"1'%))7&08<27F?3AA$E(/@A#FBBF<')G+%2".to_string(),
+                "?\"))&?,%6;GG@D-.4G5+%$8H>&%@72B;''I:>+.*\"G.$8E&./=".to_string(),
+                "!20/(B?(5\"/FC.D7*-I,%#G%;4\"7->$D@6=,C2\"')7G0FA-+I'".to_string(),
+                "9?A)>5,>E6G9<E+4@)D+\")9@>;B3#.FG;:.#21\"I378/0G=377".to_string(),
+                "17?)A$AA#C\"DI%H3F/9;'H1G93#'+4<AF/$*B,52-@!C=\"G<63".to_string(),
+                "8,%$'\"6.>:#-'G1BH11)&97>HI0D#(96H.0D0G1'(FDG::-;4\"".to_string(),
+                "7C\"&C?\"=A46?D9I1=<1345'/-;%F6363*70@$1;:80>497,@1>".to_string(),
+                "$.G-\"4?(-H&%,7<>;EE4F%00#5H2B45;2*/=I:;=36H5$%C(08".to_string(),
+                "4C+*#).<?3?1?3.??.=E:&*--;G2.?AIC('D$81H@5A;=$*D<3".to_string(),
             ]
         );
 
@@ -346,11 +375,17 @@ GTCCCTCAATCCG
 "
         .to_vec();
 
-        crate::tests::io::write_buffer(&data, temp.path())?;
+        {
+            let mut file = std::io::BufWriter::new(std::fs::File::create(&temp.path())?);
+            file.write_all(&data)?;
+        }
 
         let mut blocks = File2Block::with_blocksize(82, temp.path())?;
 
-        assert!(blocks.next_block().is_err());
+        println!("{:?} {}", String::from_utf8(data.clone()), data.len());
+        let result = blocks.next_block();
+        println!("{:?}", result);
+        assert!(result.is_err());
 
         data.extend(
             b"+FAILLED FILE
@@ -361,7 +396,11 @@ GTCCCTCAATCCG
 @iuiea
 ",
         );
-        crate::tests::io::write_buffer(&data, temp.path())?;
+
+        {
+            let mut file = std::io::BufWriter::new(std::fs::File::create(&temp.path())?);
+            file.write_all(&data)?;
+        }
 
         let mut blocks = File2Block::with_blocksize(82, temp.path())?;
 
